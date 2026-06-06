@@ -20,6 +20,9 @@ class TestFileFormat:
     def test_from_extension_pptx(self):
         assert FileFormat.from_path(Path("slides.pptx")) == FileFormat.PPTX
 
+    def test_from_extension_epub(self):
+        assert FileFormat.from_path(Path("book.epub")) == FileFormat.EPUB
+
     def test_unknown_extension_raises(self):
         with pytest.raises(ValueError, match="Unsupported format"):
             FileFormat.from_path(Path("file.xyz"))

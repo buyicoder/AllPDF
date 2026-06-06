@@ -22,6 +22,7 @@ class FileFormat(str, Enum):
     DOCX = "docx"
     XLSX = "xlsx"
     PPTX = "pptx"
+    EPUB = "epub"
 
     @classmethod
     def from_path(cls, path: Path) -> "FileFormat":
@@ -45,6 +46,7 @@ class FileFormat(str, Enum):
             "xls": cls.XLSX,
             "pptx": cls.PPTX,
             "ppt": cls.PPTX,
+            "epub": cls.EPUB,
         }
         if suffix not in mapping:
             raise ValueError(f"Unsupported format: .{suffix}")

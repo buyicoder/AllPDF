@@ -9,6 +9,7 @@ description = "Local PDF conversion toolkit — Office <-> PDF with CLI and MCP 
 requires-python = ">=3.11"
 dependencies = [
     "PyMuPDF>=1.24.0",
+    "ebooklib>=0.18",
     "pdf2docx>=0.5.8",
     "pikepdf>=9.0.0",
     "click>=8.1.0",

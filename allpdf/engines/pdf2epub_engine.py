@@ -186,10 +186,8 @@ class Pdf2EpubEngine(ConversionEngine):
                     epub_img.content = img_data
                     book.add_item(epub_img)
 
-                    # Reference by path, not base64
                     img_tags.append(
                         f'<div class="page">'
-                        f'<p class="page-num">Page {pn+1}</p>'
                         f'<img src="images/{img_filename}" alt="Page {pn+1}"/>'
                         f'</div>'
                     )
@@ -200,7 +198,7 @@ class Pdf2EpubEngine(ConversionEngine):
                     file_name=f"chap_{cn:03d}.xhtml",
                     lang="zh-CN",
                 )
-                ch.content = f"<h2>Page {i+1}</h2>\n" + "\n".join(img_tags)
+                ch.content = "\n".join(img_tags)
                 ch.add_item(style)
                 book.add_item(ch)
                 chapters.append(ch)

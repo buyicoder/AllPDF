@@ -25,6 +25,26 @@ class TestFileFormat:
             FileFormat.from_path(Path("file.xyz"))
 
 
+    def test_from_legacy_doc(self):
+        assert FileFormat.from_path(Path("old.doc")) == FileFormat.DOCX
+
+    def test_from_legacy_xls(self):
+        assert FileFormat.from_path(Path("old.xls")) == FileFormat.XLSX
+
+    def test_from_legacy_ppt(self):
+        assert FileFormat.from_path(Path("old.ppt")) == FileFormat.PPTX
+
+    def test_is_pdf(self):
+        assert FileFormat.PDF.is_pdf() is True
+        assert FileFormat.DOCX.is_pdf() is False
+
+    def test_is_office_format(self):
+        assert FileFormat.DOCX.is_office_format() is True
+        assert FileFormat.XLSX.is_office_format() is True
+        assert FileFormat.PPTX.is_office_format() is True
+        assert FileFormat.PDF.is_office_format() is False
+
+
 class TestFileInfo:
     def test_create_minimal(self):
         info = FileInfo(
@@ -65,6 +85,49 @@ class TestQualityReport:
         report = QualityReport(overall_grade=QualityGrade.YELLOW, checks=checks, summary="Warnings")
         assert report.overall_grade == QualityGrade.YELLOW
 
+    def test_from_checks_derives_green(self):
+        checks = [
+            QualityCheckItem(name="pages", grade=QualityGrade.GREEN, detail="ok"),
+        ]
+        report = QualityReport.from_checks(checks)
+        assert report.overall_grade == QualityGrade.GREEN
+
+    def test_from_checks_derives_red(self):
+        checks = [
+            QualityCheckItem(name="pages", grade=QualityGrade.GREEN, detail="ok"),
+            QualityCheckItem(name="openable", grade=QualityGrade.RED, detail="fail"),
+        ]
+        report = QualityReport.from_checks(checks)
+        assert report.overall_grade == QualityGrade.RED
+
+    def test_from_checks_derives_yellow(self):
+        checks = [
+            QualityCheckItem(name="pages", grade=QualityGrade.GREEN, detail="ok"),
+            QualityCheckItem(name="images", grade=QualityGrade.YELLOW, detail="mismatch"),
+        ]
+        report = QualityReport.from_checks(checks)
+        assert report.overall_grade == QualityGrade.YELLOW
+
+
+class TestQualityCheckItem:
+    def test_create_item(self):
+        item = QualityCheckItem(name="pages", grade=QualityGrade.GREEN, detail="all good")
+        assert item.name == "pages"
+        assert item.grade == QualityGrade.GREEN
+        assert "all good" in item.detail
+
+
+class TestEnums:
+    def test_conversion_status_values(self):
+        assert ConversionStatus.SUCCESS.value == "success"
+        assert ConversionStatus.FAILED.value == "failed"
+        assert ConversionStatus.RETRYING.value == "retrying"
+
+    def test_quality_grade_values(self):
+        assert QualityGrade.GREEN.value == "green"
+        assert QualityGrade.YELLOW.value == "yellow"
+        assert QualityGrade.RED.value == "red"
+
 
 class TestConversionResult:
     def test_success_result(self):
@@ -95,3 +158,21 @@ class TestConversionResult:
         )
         assert result.status == ConversionStatus.FAILED
         assert "password" in result.error_message
+
+    def test_result_with_quality_report(self):
+        checks = [
+            QualityCheckItem(name="pages", grade=QualityGrade.GREEN, detail="ok"),
+        ]
+        qr = QualityReport.from_checks(checks)
+        result = ConversionResult(
+            input_path=Path("in.pdf"),
+            output_path=Path("out.docx"),
+            input_format=FileFormat.PDF,
+            output_format=FileFormat.DOCX,
+            status=ConversionStatus.SUCCESS,
+            engine_used="pdf2docx",
+            duration_seconds=1.0,
+            quality_report=qr,
+        )
+        assert result.quality_report is not None
+        assert result.quality_report.overall_grade == QualityGrade.GREEN

@@ -3,7 +3,6 @@
 For scanned/image-based PDFs, renders pages as images and embeds them.
 For text-based PDFs, extracts text directly.
 """
-import base64
 import os
 import tempfile
 import time
@@ -156,11 +155,14 @@ class Pdf2EpubEngine(ConversionEngine):
         return chapters
 
     def _build_image_chapters(self, pdf_doc, page_count, book, style, spine, toc, options):
-        """Build chapters from rendered page images (for scanned PDFs)."""
+        """Build chapters from rendered page images (for scanned PDFs).
+
+        Each page image is registered as a proper EPUB image asset and
+        referenced by relative path in the HTML — readable by any e-reader.
+        """
         chapters = []
         dpi = options.get("dpi", self.IMAGE_DPI)
         mat = fitz.Matrix(dpi / 72, dpi / 72)
-
         pages_per_chapter = options.get("pages_per_chapter", 1)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -171,15 +173,25 @@ class Pdf2EpubEngine(ConversionEngine):
                 for pn in chapter_pages:
                     page = pdf_doc[pn]
                     pix = page.get_pixmap(matrix=mat)
-                    img_path = os.path.join(tmpdir, f"page_{pn:04d}.png")
+                    img_filename = f"page_{pn:04d}.png"
+                    img_path = os.path.join(tmpdir, img_filename)
                     pix.save(img_path)
 
-                    # Read image and embed as base64 in HTML
+                    # Register image as proper EPUB asset
                     with open(img_path, "rb") as f:
-                        img_b64 = base64.b64encode(f.read()).decode()
+                        img_data = f.read()
+                    epub_img = epub.EpubImage()
+                    epub_img.file_name = f"images/{img_filename}"
+                    epub_img.media_type = "image/png"
+                    epub_img.content = img_data
+                    book.add_item(epub_img)
+
+                    # Reference by path, not base64
                     img_tags.append(
-                        f'<div class="page"><p class="page-num">Page {pn+1}</p>'
-                        f'<img src="data:image/png;base64,{img_b64}" alt="Page {pn+1}"/></div>'
+                        f'<div class="page">'
+                        f'<p class="page-num">Page {pn+1}</p>'
+                        f'<img src="../images/{img_filename}" alt="Page {pn+1}"/>'
+                        f'</div>'
                     )
 
                 cn = len(chapters) + 1

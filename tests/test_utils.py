@@ -47,17 +47,15 @@ class TestEnsureDir:
 
 
 class TestCountPdfPages:
-    def test_counts_pages(self):
+    def test_counts_pages(self, tmp_path):
         import fitz
         doc = fitz.open()
         doc.new_page()
         doc.new_page()
         doc.new_page()
-        tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-        doc.save(tmp.name)
+        pdf_path = tmp_path / "test.pdf"
+        doc.save(str(pdf_path))
         doc.close()
 
-        count = count_pdf_pages(tmp.name)
+        count = count_pdf_pages(str(pdf_path))
         assert count == 3
-
-        Path(tmp.name).unlink()

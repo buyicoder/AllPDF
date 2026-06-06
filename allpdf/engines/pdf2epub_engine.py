@@ -190,7 +190,7 @@ class Pdf2EpubEngine(ConversionEngine):
                     img_tags.append(
                         f'<div class="page">'
                         f'<p class="page-num">Page {pn+1}</p>'
-                        f'<img src="../images/{img_filename}" alt="Page {pn+1}"/>'
+                        f'<img src="images/{img_filename}" alt="Page {pn+1}"/>'
                         f'</div>'
                     )
 

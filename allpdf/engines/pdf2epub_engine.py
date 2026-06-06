@@ -74,10 +74,16 @@ class Pdf2EpubEngine(ConversionEngine):
             toc = []
 
             if is_scanned:
-                dpi = options.get("dpi", self.IMAGE_DPI)
-                self._build_image_chapters(
-                    pdf_doc, page_count, book, style, spine, toc, dpi, options,
-                )
+                use_ocr = options.get("ocr", False)
+                if use_ocr:
+                    self._build_ocr_hybrid_chapters(
+                        pdf_doc, page_count, book, style, spine, toc, options,
+                    )
+                else:
+                    dpi = options.get("dpi", self.IMAGE_DPI)
+                    self._build_image_chapters(
+                        pdf_doc, page_count, book, style, spine, toc, dpi, options,
+                    )
             else:
                 self._build_text_chapters(
                     pdf_doc, page_count, book, style, spine, toc, options,
@@ -158,6 +164,138 @@ class Pdf2EpubEngine(ConversionEngine):
                 book.add_item(ch)
                 spine.append(ch)
                 toc.append(epub.Link(f"chap_{cn:03d}.xhtml", f"Page {i+1}", f"ch{cn}"))
+
+    def _build_ocr_hybrid_chapters(self, pdf_doc, page_count, book, style, spine, toc, options):
+        """Build EPUB with high-quality OCR hybrid: text for body, images for formulas.
+
+        Uses 200 DPI, image preprocessing (contrast+sharpness), and math-symbol
+        detection to minimize false image conversions.
+        """
+        import io as _io
+        import re as _re
+        import sys as _sys
+        import easyocr
+        from PIL import Image as _Image, ImageEnhance
+
+        dpi = options.get("dpi", 200)
+        threshold = options.get("text_confidence", 0.3)
+        mat = fitz.Matrix(dpi / 72, dpi / 72)
+
+        # Math-heavy pattern: if text contains many math symbols, treat as formula
+        _math_pattern = _re.compile(r'[=+\-\*/\(\)\[\]\{\}^_\\∑∫∏√∞∂∇∆±≤≥<>|~]')
+
+        print(f"  Loading EasyOCR (Chinese + English)...", file=_sys.stderr)
+        reader = easyocr.Reader(['ch_sim', 'en'], gpu=False, verbose=False)
+        print(f"  OCR: {page_count} pages, {dpi} DPI, threshold={threshold}", file=_sys.stderr)
+
+        img_counter = 0
+        for pn in range(page_count):
+            page = pdf_doc[pn]
+            pix = page.get_pixmap(matrix=mat)
+            img_bytes = pix.tobytes("png")
+
+            # Preprocess: enhance contrast + sharpen for better OCR
+            pil_img = _Image.open(_io.BytesIO(img_bytes))
+            enhancer = ImageEnhance.Contrast(pil_img)
+            pil_img = enhancer.enhance(1.5)
+            enhancer = ImageEnhance.Sharpness(pil_img)
+            pil_img = enhancer.enhance(2.0)
+            buf = _io.BytesIO()
+            pil_img.save(buf, format="PNG")
+            processed_bytes = buf.getvalue()
+
+            results = reader.readtext(processed_bytes)
+
+            if not results:
+                img_counter += 1
+                img_name = f"img_{img_counter:05d}.png"
+                epub_img = epub.EpubImage()
+                epub_img.file_name = f"images/{img_name}"
+                epub_img.media_type = "image/png"
+                epub_img.content = img_bytes  # Use original (cleaner) image
+                book.add_item(epub_img)
+
+                ch = epub.EpubHtml(
+                    title=f"Page {pn+1}",
+                    file_name=f"chap_{pn+1:03d}.xhtml", lang="zh-CN",
+                )
+                ch.content = f'<div class="page"><img src="images/{img_name}" alt="Page {pn+1}"/></div>'
+                ch.add_item(style)
+                book.add_item(ch)
+                spine.append(ch)
+                toc.append(epub.Link(f"chap_{pn+1:03d}.xhtml", f"Page {pn+1}", f"ch{pn+1}"))
+                continue
+
+            results.sort(key=lambda r: (r[0][0][1], r[0][0][0]))
+
+            html_parts = []
+            for bbox, text, conf in results:
+                t = text.strip()
+                if not t:
+                    continue
+
+                # Classify: text vs formula
+                math_score = len(_math_pattern.findall(t))
+                is_math_heavy = math_score >= 3 or (len(t) < 10 and math_score >= 1)
+                is_low_conf = conf < threshold
+
+                if is_math_heavy or is_low_conf:
+                    # Formula/symbol region → embed as cropped image
+                    x1 = max(0, int(bbox[0][0]) - 3)
+                    y1 = max(0, int(bbox[0][1]) - 3)
+                    x2 = min(pix.width, int(bbox[2][0]) + 3)
+                    y2 = min(pix.height, int(bbox[2][1]) + 3)
+
+                    # Validate coordinates
+                    if x2 <= x1 or y2 <= y1:
+                        # Invalid bbox — fall through to text
+                        t = t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        html_parts.append(f"<p>{t}</p>")
+                        continue
+
+                    # Crop from ORIGINAL image (not processed) for visual quality
+                    orig_img = _Image.open(_io.BytesIO(img_bytes))
+                    crop = orig_img.crop((x1, y1, x2, y2))
+                    crop_buf = _io.BytesIO()
+                    crop.save(crop_buf, format="PNG")
+                    crop_data = crop_buf.getvalue()
+
+                    img_counter += 1
+                    img_name = f"img_{img_counter:05d}.png"
+                    epub_img = epub.EpubImage()
+                    epub_img.file_name = f"images/{img_name}"
+                    epub_img.media_type = "image/png"
+                    epub_img.content = crop_data
+                    book.add_item(epub_img)
+
+                    html_parts.append(
+                        f'<div class="formula">'
+                        f'<img src="images/{img_name}" alt="formula"/>'
+                        f'</div>'
+                    )
+                else:
+                    # High confidence text → HTML paragraph
+                    t = t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    html_parts.append(f"<p>{t}</p>")
+
+            if not html_parts:
+                continue
+
+            ch = epub.EpubHtml(
+                title=f"Page {pn+1}",
+                file_name=f"chap_{pn+1:03d}.xhtml", lang="zh-CN",
+            )
+            ch.content = "\n".join(html_parts)
+            ch.add_item(style)
+            book.add_item(ch)
+            spine.append(ch)
+            toc.append(epub.Link(f"chap_{pn+1:03d}.xhtml", f"Page {pn+1}", f"ch{pn+1}"))
+
+            if (pn + 1) % 25 == 0:
+                pct = (pn + 1) * 100 // page_count
+                print(f"  Page {pn+1}/{page_count} ({pct}%), {img_counter} images", file=_sys.stderr)
+
+            print(f"  OCR done. {img_counter} formula images embedded.", file=_sys.stderr)
 
     def _build_text_chapters(self, pdf_doc, page_count, book, style, spine, toc, options):
         """Build chapters from extractable text."""

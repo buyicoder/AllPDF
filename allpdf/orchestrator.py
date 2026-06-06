@@ -6,6 +6,7 @@ from allpdf.engines.base import ConversionEngine
 from allpdf.engines.epub2pdf_engine import Epub2PdfEngine
 from allpdf.engines.libreoffice import LibreOfficeEngine
 from allpdf.engines.pdf2docx_engine import Pdf2DocxEngine
+from allpdf.engines.pdf2epub_engine import Pdf2EpubEngine
 from allpdf.engines.pdf2xlsx_engine import Pdf2XlsxEngine
 from allpdf.engines.pdf2pptx_engine import Pdf2PptxEngine
 from allpdf.models import ConversionResult, ConversionStatus, FileFormat
@@ -30,6 +31,7 @@ class Orchestrator:
             self._engines[(fmt, FileFormat.PDF)] = self._libreoffice
 
         self._engines[(FileFormat.EPUB, FileFormat.PDF)] = Epub2PdfEngine()
+        self._engines[(FileFormat.PDF, FileFormat.EPUB)] = Pdf2EpubEngine()
         self._engines[(FileFormat.PDF, FileFormat.DOCX)] = Pdf2DocxEngine()
         self._engines[(FileFormat.PDF, FileFormat.XLSX)] = Pdf2XlsxEngine()
         self._engines[(FileFormat.PDF, FileFormat.PPTX)] = Pdf2PptxEngine()

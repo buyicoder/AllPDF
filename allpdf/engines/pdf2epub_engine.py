@@ -1,7 +1,8 @@
 """PDF to EPUB engine using PyMuPDF text extraction + ebooklib EPUB creation.
 
-For scanned/image-based PDFs, renders pages as images and embeds them.
-For text-based PDFs, extracts text directly.
+Scanned/image-based PDFs: renders pages as images and embeds them as proper
+EPUB image assets (e-reader compatible).
+Text-based PDFs: extracts text directly.
 """
 import os
 import tempfile
@@ -19,13 +20,14 @@ class Pdf2EpubEngine(ConversionEngine):
     """Convert PDF to EPUB e-book.
 
     Auto-detects scanned PDFs and switches to image-based rendering.
+    Each page image is registered as a proper EPUB asset, referenced
+    by relative path — readable by any EPUB reader.
     """
 
     name = "pdf2epub"
     input_format = FileFormat.PDF
     output_format = FileFormat.EPUB
 
-    # DPI for rendering scanned pages
     IMAGE_DPI = 150
 
     def convert(self, input_path: str, output_path: str, **options) -> ConversionResult:
@@ -47,7 +49,7 @@ class Pdf2EpubEngine(ConversionEngine):
             pdf_doc = fitz.open(input_path)
             page_count = pdf_doc.page_count
 
-            # Detect if this is a scanned PDF
+            # Detect scanned PDF
             total_text = sum(len(pdf_doc[p].get_text()) for p in range(min(10, page_count)))
             is_scanned = total_text < 100
 
@@ -58,9 +60,9 @@ class Pdf2EpubEngine(ConversionEngine):
             book.add_author("Converted by AllPDF")
 
             style_content = (
-                "body{font-family:serif;font-size:1em;line-height:1.8;margin:1em}"
-                "p{text-indent:2em;margin:0.5em 0}h1,h2{text-align:center}"
-                "img{max-width:100%;height:auto;display:block;margin:0 auto}"
+                "body{font-family:serif;font-size:1em;line-height:1.8;margin:0}"
+                "img{max-width:100%;height:auto;display:block;margin:0;padding:0}"
+                ".page{margin:0;padding:0}"
             )
             style = epub.EpubItem(
                 uid="style", file_name="style/default.css",
@@ -70,15 +72,15 @@ class Pdf2EpubEngine(ConversionEngine):
 
             spine = ["nav"]
             toc = []
-            chapters = []
 
             if is_scanned:
-                chapters = self._build_image_chapters(
-                    pdf_doc, page_count, book, style, spine, toc, options
+                dpi = options.get("dpi", self.IMAGE_DPI)
+                self._build_image_chapters(
+                    pdf_doc, page_count, book, style, spine, toc, dpi, options,
                 )
             else:
-                chapters = self._build_text_chapters(
-                    pdf_doc, page_count, book, style, spine, toc, options
+                self._build_text_chapters(
+                    pdf_doc, page_count, book, style, spine, toc, options,
                 )
 
             book.toc = toc
@@ -113,55 +115,9 @@ class Pdf2EpubEngine(ConversionEngine):
                 error_message=str(e),
             )
 
-    def _build_text_chapters(self, pdf_doc, page_count, book, style, spine, toc, options):
-        """Build chapters from extractable text."""
-        chapters = []
-        pages_per_chapter = options.get("pages_per_chapter", 5)
-
-        for i in range(0, page_count, pages_per_chapter):
-            chapter_pages = range(i, min(i + pages_per_chapter, page_count))
-            parts = []
-            for pn in chapter_pages:
-                text = pdf_doc[pn].get_text()
-                if text.strip():
-                    parts.append(f'<p class="page-num">—— 第{pn+1}页 ——</p>')
-                    for para in text.strip().split("\n"):
-                        para = para.strip()
-                        if para:
-                            para = para.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                            parts.append(f"<p>{para}</p>")
-            if not parts:
-                continue
-
-            cn = len(chapters) + 1
-            ch = epub.EpubHtml(
-                title=f"Chapter {cn}", file_name=f"chap_{cn:03d}.xhtml", lang="zh-CN",
-            )
-            ch.content = f"<h2>Chapter {cn}</h2>\n" + "\n".join(parts)
-            ch.add_item(style)
-            book.add_item(ch)
-            chapters.append(ch)
-            spine.append(ch)
-            toc.append(epub.Link(f"chap_{cn:03d}.xhtml", f"Chapter {cn}", f"ch{cn}"))
-
-        if not chapters:
-            ch = epub.EpubHtml(title="Content", file_name="chap_001.xhtml", lang="zh-CN")
-            ch.content = "<p>No extractable text found.</p>"
-            ch.add_item(style)
-            book.add_item(ch)
-            chapters.append(ch)
-            spine.append(ch)
-
-        return chapters
-
-    def _build_image_chapters(self, pdf_doc, page_count, book, style, spine, toc, options):
-        """Build chapters from rendered page images (for scanned PDFs).
-
-        Each page image is registered as a proper EPUB image asset and
-        referenced by relative path in the HTML — readable by any e-reader.
-        """
-        chapters = []
-        dpi = options.get("dpi", self.IMAGE_DPI)
+    def _build_image_chapters(self, pdf_doc, page_count, book, style, spine, toc,
+                              dpi, options):
+        """Build chapters from rendered page images (for scanned PDFs)."""
         mat = fitz.Matrix(dpi / 72, dpi / 72)
         pages_per_chapter = options.get("pages_per_chapter", 1)
 
@@ -177,7 +133,6 @@ class Pdf2EpubEngine(ConversionEngine):
                     img_path = os.path.join(tmpdir, img_filename)
                     pix.save(img_path)
 
-                    # Register image as proper EPUB asset
                     with open(img_path, "rb") as f:
                         img_data = f.read()
                     epub_img = epub.EpubImage()
@@ -192,7 +147,7 @@ class Pdf2EpubEngine(ConversionEngine):
                         f'</div>'
                     )
 
-                cn = len(chapters) + 1
+                cn = len(toc) + 1
                 ch = epub.EpubHtml(
                     title=f"Page {i+1}",
                     file_name=f"chap_{cn:03d}.xhtml",
@@ -201,8 +156,33 @@ class Pdf2EpubEngine(ConversionEngine):
                 ch.content = "\n".join(img_tags)
                 ch.add_item(style)
                 book.add_item(ch)
-                chapters.append(ch)
                 spine.append(ch)
                 toc.append(epub.Link(f"chap_{cn:03d}.xhtml", f"Page {i+1}", f"ch{cn}"))
 
-        return chapters
+    def _build_text_chapters(self, pdf_doc, page_count, book, style, spine, toc, options):
+        """Build chapters from extractable text."""
+        pages_per_chapter = options.get("pages_per_chapter", 5)
+
+        for i in range(0, page_count, pages_per_chapter):
+            chapter_pages = range(i, min(i + pages_per_chapter, page_count))
+            parts = []
+            for pn in chapter_pages:
+                text = pdf_doc[pn].get_text()
+                if text.strip():
+                    for para in text.strip().split("\n"):
+                        para = para.strip()
+                        if para:
+                            para = para.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                            parts.append(f"<p>{para}</p>")
+            if not parts:
+                continue
+
+            cn = len(toc) + 1
+            ch = epub.EpubHtml(
+                title=f"Chapter {cn}", file_name=f"chap_{cn:03d}.xhtml", lang="zh-CN",
+            )
+            ch.content = "\n".join(parts)
+            ch.add_item(style)
+            book.add_item(ch)
+            spine.append(ch)
+            toc.append(epub.Link(f"chap_{cn:03d}.xhtml", f"Chapter {cn}", f"ch{cn}"))

@@ -5,6 +5,7 @@ from typing import Optional
 from allpdf.engines.base import ConversionEngine
 from allpdf.engines.epub2pdf_engine import Epub2PdfEngine
 from allpdf.engines.libreoffice import LibreOfficeEngine
+from allpdf.engines.mineru_epub_engine import MinerUEpubEngine
 from allpdf.engines.pdf2docx_engine import Pdf2DocxEngine
 from allpdf.engines.pdf2epub_engine import Pdf2EpubEngine
 from allpdf.engines.pdf2xlsx_engine import Pdf2XlsxEngine
@@ -36,6 +37,10 @@ class Orchestrator:
         self._engines[(FileFormat.PDF, FileFormat.XLSX)] = Pdf2XlsxEngine()
         self._engines[(FileFormat.PDF, FileFormat.PPTX)] = Pdf2PptxEngine()
 
+        # Alternative engines (higher quality, may require external services)
+        self._alt_engines: dict[tuple[FileFormat, FileFormat], list[ConversionEngine]] = {}
+        self._alt_engines[(FileFormat.PDF, FileFormat.EPUB)] = [MinerUEpubEngine()]
+
     def convert(
         self,
         input_path: str,
@@ -53,7 +58,10 @@ class Orchestrator:
         if output_format is None:
             output_format = FileFormat.from_path(Path(output_path))
 
-        engine = self._get_engine(input_format, output_format)
+        engine = (
+            self.get_engine(options.pop("engine", ""))
+            or self._get_engine(input_format, output_format)
+        )
         if engine is None:
             return ConversionResult(
                 input_path=Path(input_path), output_path=Path(output_path),
@@ -96,15 +104,25 @@ class Orchestrator:
         return self.convert(input_path, output_path, input_format, output_format, **options)
 
     def list_engines(self) -> list[ConversionEngine]:
-        """Return all registered engines."""
-        return list(self._engines.values())
+        """Return all registered engines (including alternatives)."""
+        engines = list(self._engines.values())
+        for alt_list in getattr(self, "_alt_engines", {}).values():
+            engines.extend(alt_list)
+        return engines
 
     def get_supported_conversions(self) -> list[dict]:
         """Return the conversion matrix with availability status."""
-        return [
+        conversions = [
             {"from": src.value, "to": dst.value, "engine": engine.name, "available": engine.is_available()}
             for (src, dst), engine in self._engines.items()
         ]
+        for (src, dst), alt_list in getattr(self, "_alt_engines", {}).items():
+            for engine in alt_list:
+                conversions.append({
+                    "from": src.value, "to": dst.value,
+                    "engine": engine.name, "available": engine.is_available(),
+                })
+        return conversions
 
     def _get_engine(self, src: FileFormat, dst: FileFormat) -> Optional[ConversionEngine]:
         key = (src, dst)
@@ -116,5 +134,18 @@ class Orchestrator:
         return None
 
     def _get_alternative(self, src: FileFormat, dst: FileFormat) -> Optional[ConversionEngine]:
-        """Find an alternative engine (extensibility point)."""
+        """Return an alternative engine for this conversion pair, if available."""
+        key = (src, dst)
+        alts = getattr(self, "_alt_engines", {}).get(key, [])
+        return alts[0] if alts else None
+
+    def get_engine(self, name: str) -> Optional[ConversionEngine]:
+        """Get a specific engine by name (e.g. ``"mineru-epub"``)."""
+        for engine in self._engines.values():
+            if engine.name == name:
+                return engine
+        for alt_list in getattr(self, "_alt_engines", {}).values():
+            for engine in alt_list:
+                if engine.name == name:
+                    return engine
         return None

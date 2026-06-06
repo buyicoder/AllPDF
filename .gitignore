@@ -6,6 +6,8 @@ dist/
 build/
 .env
 .venv/
+.venv-mineru/
+output/
 *.tmp
 *.log
 .coverage

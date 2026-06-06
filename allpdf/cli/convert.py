@@ -8,13 +8,14 @@ from allpdf.quality.report import format_report
 
 @click.command()
 @click.argument("input_file")
-@click.option("--to", "target_format", default=None, help="Target format (pdf, docx, xlsx, pptx)")
+@click.option("--to", "target_format", default=None, help="Target format (pdf, docx, xlsx, pptx, epub)")
 @click.option("--output", "-o", default=None, help="Output file path")
 @click.option("--pages", default=None, help="Page range (e.g., 1-3,5,7)")
+@click.option("--engine", default=None, help="Engine to use (e.g. mineru-epub for PDF→EPUB via MinerU)")
 @click.option("--quality-check/--no-quality-check", default=False, help="Run quality checks after conversion")
 @click.option("--retry", type=int, default=0, help="Retry count with alternative engines")
 @click.option("--output-format", "out_fmt", type=click.Choice(["text", "json"]), default="text")
-def convert(input_file, target_format, output, pages, quality_check, retry, out_fmt):
+def convert(input_file, target_format, output, pages, engine, quality_check, retry, out_fmt):
     """Convert a file to another format."""
     if not os.path.exists(input_file):
         click.echo(f"Error: File not found: {input_file}", err=True)
@@ -42,6 +43,7 @@ def convert(input_file, target_format, output, pages, quality_check, retry, out_
     result = orch.convert_auto(
         input_file, output, dst_fmt,
         quality_check=quality_check, retry=retry, pages=page_list,
+        engine=engine,
     )
 
     if result.status.value == "success":
